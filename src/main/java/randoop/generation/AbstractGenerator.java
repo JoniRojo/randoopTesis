@@ -49,28 +49,30 @@ public abstract class AbstractGenerator {
   /**
    * Number of generation steps (each an attempt to generate and execute a new, distinct sequence).
    */
-  public int num_steps = 0;
+  public int num_steps = 0;           // Es la cantidad de veces que ejecuto el createAndClassifySequence() ???
+                                      // Puede ser que sea la cantidad de veces que se llamo a step() en createAndClassifySequence() ??
 
   /** Number of steps that returned null. */
   public int null_steps = 0;
 
   /** Number of sequences generated. */
-  public int num_sequences_generated = 0;
+  public int num_sequences_generated = 0;             // Cantidad de secuencias generadas, no importa si realmente sirven o no, no fueron ejecutadas
 
   /** Number of failing sequences generated. */
-  public int num_failing_sequences = 0;
+  public int num_failing_sequences = 0;               // Cantidad de secuencias ejecutadas que fallaron, que pasaron el filtro de outputTest(por lo que randoop considera que
+                                                      // es un test interesante) y es una secuencia para un test negativo (outErrorSeqs)
 
   /** Number of invalid sequences generated. */
-  public int invalidSequenceCount = 0;
+  public int invalidSequenceCount = 0;                // Cantidad de secuancias inutiles, no sirven ni para test negativo, ni para test de regresion, no se pudieron ejecutar
 
   /** Number of sequences that failed the output test. */
-  public int num_failed_output_test = 0;
+  public int num_failed_output_test = 0;                    // Cantidad de secuencias que fueron ejecutadas pero no pasaron el filtro de outputTest
 
   /** When the generator started (millisecond-based system timestamp). */
   private long startTime = -1;
 
   /** Sequences that are used in other sequences (and are thus redundant). */
-  protected Set<Sequence> subsumed_sequences = new LinkedHashSet<>();
+  protected Set<Sequence> subsumed_sequences = new LinkedHashSet<>();         // aqui almacena las secuencias redundantes, secuencias que son subsecuencias de otras
 
   /**
    * Elapsed time since the generator started.
@@ -89,13 +91,13 @@ public abstract class AbstractGenerator {
    * generate sequences. In other words, statements specifies the universe of operations from which
    * sequences are generated.
    */
-  protected final List<TypedOperation> operations;
+  protected final List<TypedOperation> operations;            // aqui estan todos los metodos con los cuales va generando secuencias ??? Creo que si
 
   /** Container for execution visitors used during execution of sequences. */
   protected ExecutionVisitor executionVisitor;
 
   /** Component manager responsible for storing previously-generated sequences. */
-  public ComponentManager componentManager;
+  public ComponentManager componentManager;                 // maneja subsecuencias que podriaqn usarse para generar otras ???
 
   /** Customizable stopping criterion in addition to time and sequence limits. */
   private @Nullable IStopper stopper;
@@ -117,19 +119,19 @@ public abstract class AbstractGenerator {
    * The list of error test sequences to be output as JUnit tests. May include subsequences of other
    * sequences in the list.
    */
-  public List<ExecutableSequence> outErrorSeqs;
+  public List<ExecutableSequence> outErrorSeqs;             // secuencias que causaron fallos, usadas para los test negativos
 
   /**
    * The list of regression sequences to be output as JUnit tests. May include subsequences of other
-   * sequences in the list.
+   * sequences in the list.,
    */
-  public List<ExecutableSequence> outRegressionSeqs;
+  public List<ExecutableSequence> outRegressionSeqs;       // secuncias que se ejecutaron correctamente, usadas para test de regresion
 
   /**
    * A filter to determine whether a sequence should be added to the output sequence lists. Returns
    * true if the sequence should be output.
    */
-  public Predicate<ExecutableSequence> outputTest;
+  public Predicate<ExecutableSequence> outputTest;        // filtro utilizado para determinar si una secuencia puede ser usada como test de salida
 
   /** Visitor to generate checks for a sequence. */
   protected TestCheckGenerator checkGenerator;
@@ -181,7 +183,7 @@ public abstract class AbstractGenerator {
     if (outputTest == null) {
       throw new IllegalArgumentException("outputTest must be non-null");
     }
-    this.outputTest = outputTest;
+    this.outputTest = outputTest;           // Setea el predicado usado para filtrar las secuencias que va generando
   }
 
   /**
@@ -224,7 +226,7 @@ public abstract class AbstractGenerator {
    *
    * @return true iff any stopping criterion is met
    */
-  protected boolean shouldStop() {
+  protected boolean shouldStop() {                                                          // retorna true si se cumple un criterio de detenimiento
     return (limits.time_limit_millis != 0 && elapsedTime() >= limits.time_limit_millis)
         || (numAttemptedSequences() >= limits.attempted_limit)
         || (numGeneratedSequences() >= limits.generated_limit)
@@ -238,7 +240,7 @@ public abstract class AbstractGenerator {
    *
    * @return a test sequence, may be null
    */
-  public abstract @Nullable ExecutableSequence step();
+  public abstract @Nullable ExecutableSequence step();            // aqui se debe implementar un paso del generador (implementacion de la generacion de un test(de una secuencia))
 
   /**
    * Returns the count of attempts to generate a sequence so far.
@@ -280,7 +282,7 @@ public abstract class AbstractGenerator {
    * @see AbstractGenerator#shouldStop()
    * @see AbstractGenerator#step()
    */
-  public void createAndClassifySequences() {
+  public void createAndClassifySequences() {            // crea y ejecuta secuencias hasta que se cumpla un criterio de detenimiento
     if (checkGenerator == null) {
       throw new Error("Generator not properly initialized - must have a TestCheckGenerator");
     }
@@ -296,46 +298,46 @@ public abstract class AbstractGenerator {
 
       num_steps++;
 
-      ExecutableSequence eSeq = step();
+      ExecutableSequence eSeq = step();       // crea la secuancia y la ejecuta, eSeq contiene metodos para chequear los resultados de la ejecucion
 
-      if (dump_sequences) {
+      if (dump_sequences) {                   // esta en true si se activa en las opciones, hace que se escriba cada secuencia creada en el logFile
         Log.logPrintf("%nseq before run:%n%s%n", eSeq);
       }
 
-      if (GenInputsAbstract.progressdisplay
+      if (GenInputsAbstract.progressdisplay       // actualiza el display ???
           && GenInputsAbstract.progressintervalsteps != -1
           && num_steps % GenInputsAbstract.progressintervalsteps == 0) {
         progressDisplay.display(!GenInputsAbstract.deterministic);
       }
 
-      if (eSeq == null) {
+      if (eSeq == null) {       // si eSeq es null se incremente el contador de generaciones nulas, se continua al proximo paso del ciclo
         null_steps++;
         continue;
       }
 
-      num_sequences_generated++;
+      num_sequences_generated++;        // si no es null, se aumenta la variable de secuencias generadas
 
       boolean test;
       try {
-        test = outputTest.test(eSeq);
+        test = outputTest.test(eSeq);         // se aplica el filtro, como se aplican ??? donde esta ese codigo ???
       } catch (Throwable t) {
         System.out.printf(
             "%nProblem with sequence:%n%s%n%s%n", eSeq, UtilPlume.stackTraceToString(t));
         throw t;
       }
-      if (test) {
+      if (test) {                             // si la secuencia paso el filtro entonces se clasifica
         // Classify the sequence
-        if (eSeq.hasInvalidBehavior()) {
-          invalidSequenceCount++;
-        } else if (eSeq.hasFailure()) {
-          operationHistory.add(eSeq.getOperation(), OperationOutcome.ERROR_SEQUENCE);
-          num_failing_sequences++;
-          outErrorSeqs.add(eSeq);
+        if (eSeq.hasInvalidBehavior()) {      // checkea si la secuencia tiene alguna parte invalida
+          invalidSequenceCount++;                       // si es asi, aumenta el contador de secuencias inutiles
+        } else if (eSeq.hasFailure()) {       // si la secuencia no es invalida, sino que tiene un fallo, entonces nos sirve para test negativo
+          operationHistory.add(eSeq.getOperation(), OperationOutcome.ERROR_SEQUENCE);        // es importante esto ???
+          num_failing_sequences++;                      // se aumenta el contador de secuencias fallidas
+          outErrorSeqs.add(eSeq);                       // se agrega a la lista para test negativo
         } else {
-          outRegressionSeqs.add(eSeq);
+          outRegressionSeqs.add(eSeq);              // sino entonces es una secuencia que no falla y que nos sirve para test de regresion
           newRegressionTestHook(eSeq.sequence);
         }
-      } else {
+      } else {      // Y si no pasa el filtro, se aumenta el respectivo contador
         num_failed_output_test++;
       }
 

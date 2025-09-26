@@ -1,11 +1,12 @@
 package randoop.generation;
 
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.LinkedHashSet;
-import java.util.List;
-import java.util.Set;
-import java.util.StringJoiner;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.StandardOpenOption;
+import java.util.*;
+
+import com.fasterxml.jackson.databind.SerializationFeature;
 import org.checkerframework.checker.nullness.qual.Nullable;
 import org.plumelib.util.CollectionsPlume;
 import org.plumelib.util.StringsPlume;
@@ -22,12 +23,7 @@ import randoop.operation.TypedClassOperation;
 import randoop.operation.TypedOperation;
 import randoop.reflection.RandoopInstantiationError;
 import randoop.reflection.TypeInstantiator;
-import randoop.sequence.ExecutableSequence;
-import randoop.sequence.Sequence;
-import randoop.sequence.SequenceExceptionError;
-import randoop.sequence.Statement;
-import randoop.sequence.Value;
-import randoop.sequence.Variable;
+import randoop.sequence.*;
 import randoop.test.DummyCheckGenerator;
 import randoop.types.ClassOrInterfaceType;
 import randoop.types.InstantiatedType;
@@ -40,6 +36,7 @@ import randoop.util.MultiMap;
 import randoop.util.Randomness;
 import randoop.util.list.SimpleArrayList;
 import randoop.util.list.SimpleList;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 /** Randoop's forward, component-based generator. */
 public class ForwardGenerator extends AbstractGenerator {
@@ -51,10 +48,11 @@ public class ForwardGenerator extends AbstractGenerator {
    * <p>This must be ordered by insertion to allow for flaky test history collection in {@link
    * randoop.main.GenTests#printSequenceExceptionError(AbstractGenerator, SequenceExceptionError)}.
    */
-  private final LinkedHashSet<Sequence> allSequences = new LinkedHashSet<>();
+
+  private final LinkedHashSet<Sequence> allSequences = new LinkedHashSet<>();           // Conjunto de todas las secuencias generedas, incluso las que se descartan
 
   /** The side-effect-free methods. */
-  private final Set<TypedOperation> sideEffectFreeMethods;
+  private final Set<TypedOperation> sideEffectFreeMethods;                      // Conjunto de metodos libres de side effect (son aquellos metodos que utilizara ???)
 
   /**
    * Set and used only if {@link GenInputsAbstract#debug_checks}==true. This contains the same
@@ -68,14 +66,14 @@ public class ForwardGenerator extends AbstractGenerator {
    * components as {@link #allSequences}, in the same order, but can be accessed by index.
    */
   private final List<Sequence> allsequencesAsList = new ArrayList<>();
-
   private final TypeInstantiator instantiator;
 
   /** How to select sequences as input for creating new sequences. */
-  private final InputSequenceSelector inputSequenceSelector;
+  private final InputSequenceSelector inputSequenceSelector;            // selecciona aleatoriamente una secuencia para usar como entrada a una operación.
+                                                                        // cuando tiene una secuencia que anda, la usa como base, como input, para otra secuencia..
 
   /** How to select the method to use for creating a new sequence. */
-  private final TypedOperationSelector operationSelector;
+  private final TypedOperationSelector operationSelector;               // es quien dice como se van selecionar los operadores(metodos,constructores,etc)
 
   /**
    * The set of all primitive values seen during generation and execution of sequences. This set is
@@ -83,16 +81,26 @@ public class ForwardGenerator extends AbstractGenerator {
    *
    * <p>Each value in the collection is a primitive wrapper or a String.
    */
-  private Set<Object> runtimePrimitivesSeen = new LinkedHashSet<>();
+  private Set<Object> runtimePrimitivesSeen = new LinkedHashSet<>();        // va guardando todos lo valores primitivos que fueron vistos o generados en la generacion de secuencias
+
+  /** For serialize objects */
+  private static final ObjectMapper mapper = new ObjectMapper();
+  static {
+    mapper.enable(SerializationFeature.INDENT_OUTPUT);
+  }
+  private static final Path outputFile = Paths.get("objectGenerated.json");
 
   /**
    * Create a forward generator.
    *
-   * @param operations list of operations under test
-   * @param sideEffectFreeMethods side-effect-free methods
-   * @param limits limits for generation, after which the generator will stop
-   * @param componentManager stores previously-generated sequences
-   * @param classesUnderTest set of classes under test
+   * @param operations list of operations under test                                // lista de metodos, constructores o inicializaciones primitivas que puede usar para generar secuencias.
+   *                                                                                //  Estas operaciones no tiene valores ni estados.
+   * @param sideEffectFreeMethods side-effect-free methods                          // subconjunto de metodos que no tiene efectos colaterales
+   * @param limits limits for generation, after which the generator will stop       // limites de generacion (cantidad y tiempo)
+   * @param componentManager stores previously-generated sequences                  // manejador de secuencias ya generadas. Solo las secuencias validas (ejecutables) y utiles son guardadas.
+   *                                                                                //  Las secuencias se guardan como un par Map<Type, List<Sequence> sequencesByType> En type guarda el tipo
+   *                                                                                //   de salida, y List<Sequence> las secuencias que producen ese tipo. Esta informacion es importante.
+   * @param classesUnderTest set of classes under test                              // clases concretas que estan siendo testeadas
    */
   public ForwardGenerator(
       List<TypedOperation> operations,
@@ -126,34 +134,34 @@ public class ForwardGenerator extends AbstractGenerator {
       ComponentManager componentManager,
       @Nullable IStopper stopper,
       Set<ClassOrInterfaceType> classesUnderTest) {
-    super(operations, limits, componentManager, stopper);
+    super(operations, limits, componentManager, stopper);                               // llama al constructor de la clase padre (AbstractGenerator ???)
 
     this.sideEffectFreeMethods = sideEffectFreeMethods;
-    this.instantiator = componentManager.getTypeInstantiator();
+    this.instantiator = componentManager.getTypeInstantiator();                         // ???
 
     initializeRuntimePrimitivesSeen();
 
-    switch (GenInputsAbstract.method_selection) {
+    switch (GenInputsAbstract.method_selection) {                                       // segun la configuracion de --method-selection se define como se van a elegir los metodos
       case UNIFORM:
-        this.operationSelector = new UniformRandomMethodSelection(operations);
+        this.operationSelector = new UniformRandomMethodSelection(operations);          // al azar con distribucion unfirme
         break;
       case BLOODHOUND:
-        this.operationSelector = new Bloodhound(operations, classesUnderTest);
+        this.operationSelector = new Bloodhound(operations, classesUnderTest);          // prioriza los metodos que ayudan a aumentar la cobertura de codigo
         break;
       default:
         throw new Error("Unhandled method_selection: " + GenInputsAbstract.method_selection);
     }
 
-    switch (GenInputsAbstract.input_selection) {
+    switch (GenInputsAbstract.input_selection) {                                        // define como se van a elegir los inputs para los metodos (???)
       case ORIENTEERING:
         inputSequenceSelector =
-            new OrienteeringSelection(componentManager.getAllGeneratedSequences());
+            new OrienteeringSelection(componentManager.getAllGeneratedSequences());     // heuristica para encontrar inputs mas utiles
         break;
       case SMALL_TESTS:
-        inputSequenceSelector = new SmallTestsSequenceSelection();
+        inputSequenceSelector = new SmallTestsSequenceSelection();                      // prioriza inputs simples y pequeños
         break;
       case UNIFORM:
-        inputSequenceSelector = new UniformRandomSequenceSelection();
+        inputSequenceSelector = new UniformRandomSequenceSelection();                   // al azar de forma uniforme
         break;
       default:
         throw new Error("Unhandled --input-selection: " + GenInputsAbstract.input_selection);
@@ -166,7 +174,7 @@ public class ForwardGenerator extends AbstractGenerator {
    * @param sequence the new sequence that was classified as a regression test
    */
   @Override
-  public void newRegressionTestHook(Sequence sequence) {
+  public void newRegressionTestHook(Sequence sequence) {                                        // Porqué debe notificar que hay un nuevo test de regresion ???
     operationSelector.newRegressionTestHook(sequence);
   }
 
@@ -176,7 +184,7 @@ public class ForwardGenerator extends AbstractGenerator {
    * initially contains a set of primitive sequences; this method puts those primitives in this set.
    */
   // XXX this is goofy - these values are available in other ways
-  private void initializeRuntimePrimitivesSeen() {
+  private void initializeRuntimePrimitivesSeen() {     // Se encarga de tomar aquellas primitivas que general valores primitivos, para ejecutarlas y guardar esos valores primitivos (es eso ???)
     for (Sequence s : componentManager.getAllPrimitiveSequences()) {
       ExecutableSequence es = new ExecutableSequence(s);
       es.execute(new DummyVisitor(), new DummyCheckGenerator());
@@ -196,17 +204,17 @@ public class ForwardGenerator extends AbstractGenerator {
 
     long startTimeNanos = System.nanoTime();
 
-    if (componentManager.numGeneratedSequences() % GenInputsAbstract.clear == 0) {
+    if (componentManager.numGeneratedSequences() % GenInputsAbstract.clear == 0) {      // cada cierto numero de secuencias generadas, limpia las secuencias guardadas en componenetManager
       componentManager.clearGeneratedSequences();
     }
     if (SystemPlume.usedMemory(false) > GenInputsAbstract.clear_memory
-        && SystemPlume.usedMemory(true) > GenInputsAbstract.clear_memory) {
+        && SystemPlume.usedMemory(true) > GenInputsAbstract.clear_memory) {      // limpia si hay mucha memoria usada
       componentManager.clearGeneratedSequences();
     }
 
-    ExecutableSequence eSeq = createNewUniqueSequence();
+    ExecutableSequence eSeq = createNewUniqueSequence();                                // crea una NUEVA y unica secuencia
 
-    if (eSeq == null) {
+    if (eSeq == null) {                                                                 // si no pudo generar una secuencia, mide el tiempo y devuelve null
       long gentimeNanos = System.nanoTime() - startTimeNanos;
       if (gentimeNanos > timeWarningLimitNanos) {
         System.out.printf(
@@ -215,7 +223,7 @@ public class ForwardGenerator extends AbstractGenerator {
       return null;
     }
 
-    if (GenInputsAbstract.dontexecute) {
+    if (GenInputsAbstract.dontexecute) {                                                // si esta en modo "solo generar y no ejecutar", la genera y la guarda directamente
       this.componentManager.addGeneratedSequence(eSeq.sequence);
       long gentimeNanos = System.nanoTime() - startTimeNanos;
       if (gentimeNanos > timeWarningLimitNanos) {
@@ -225,14 +233,14 @@ public class ForwardGenerator extends AbstractGenerator {
       return null;
     }
 
-    setCurrentSequence(eSeq.sequence);
+    setCurrentSequence(eSeq.sequence);                                                  // setea la secuencia corriente
 
     long gentimeNanos1 = System.nanoTime() - startTimeNanos;
 
     // Useful for debugging non-terminating sequences.
     // System.out.printf("step() is considering: %n%s%n%n", eSeq.sequence);
 
-    eSeq.execute(executionVisitor, checkGenerator);
+    eSeq.execute(executionVisitor, checkGenerator);                                     // ejectura la secuencia y guarda los resultados observados
 
     // Dynamic type casting permits calling methods that do not exist on the declared type.
     boolean cast = eSeq.castToRunTimeType();
@@ -244,11 +252,23 @@ public class ForwardGenerator extends AbstractGenerator {
 
     startTimeNanos = System.nanoTime(); // reset start time.
 
-    inputSequenceSelector.createdExecutableSequence(eSeq);
+    inputSequenceSelector.createdExecutableSequence(eSeq);                            // informa al selector de secuencias que se creo una nueva (???)
 
-    determineActiveIndices(eSeq);
+    determineActiveIndices(eSeq);                                                     // marca si la secuencia tiene instrucciones activas
 
-    if (eSeq.sequence.hasActiveFlags()) {
+    /** For serialize objects */
+    /*
+    eSeq.getAllValues().forEach(value -> {
+      saveObject(value.getObjectValue());
+    });
+     */
+
+    List<ReferenceValue> list = eSeq.getAllValues();
+    for(ReferenceValue value : list){
+      saveObject(value.getObjectValue());
+    }
+
+    if (eSeq.sequence.hasActiveFlags()) {                                             // si tiene instrucciones activas entonces agrega la secuncia generada como util en el componentManager
       componentManager.addGeneratedSequence(eSeq.sequence);
     }
 
@@ -272,22 +292,38 @@ public class ForwardGenerator extends AbstractGenerator {
     return eSeq;
   }
 
+  /** For serialize objects */
+  private static void saveObject(Object obj) {
+    try {
+      Map<String, Object> serializable = new HashMap<>();
+      serializable.put("class", obj.getClass().getName());
+      serializable.put("toString", obj.toString());
+
+      String json = mapper.writeValueAsString(serializable);
+      Files.write(outputFile, (json + "\n").getBytes(),
+              StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+      System.out.println("Object generated: " + obj);
+    } catch (Exception e) {
+      System.err.println("The object could not be serialized: " + e.getMessage());
+    }
+  }
+
   @Override
   public Set<Sequence> getAllSequences() {
     return this.allSequences;
   }
 
   /**
-   * Determines what indices in the given sequence are active. (Actually, sets some indices as not
-   * active, since the default is that every index is active.)
-   *
-   * <p>An active index i means that the i-th method call creates an interesting/useful value that
-   * can be used as an input to a larger sequence; inactive indices are never used as inputs. The
-   * SequenceCollection to which the given sequences is added only considers the active indices when
-   * deciding whether the sequence creates values of a given type.
-   *
-   * <p>In addition to determining active indices, this method determines if any primitive values
-   * created during execution of the sequence are new values not encountered before. Such values are
+   * Determines what indices in the given sequence are active. (Actually, sets some indices as not      //Dada una secuencia, recorre linea por linea(cada indice) y determina si es activa o no
+   * active, since the default is that every index is active.)                                          //Que sea activa significa que es util, es decir que genera valores que pueden ser reutilizados
+   *                                                                                                    // para generar otras secuencias.
+   * <p>An active index i means that the i-th method call creates an interesting/useful value that      //Es activa cuando no se cumple ninguna de estas condiciones:
+   * can be used as an input to a larger sequence; inactive indices are never used as inputs. The       // Que retorna void
+   * SequenceCollection to which the given sequences is added only considers the active indices when    // General null
+   * deciding whether the sequence creates values of a given type.                                      // Es una primitiva (checkea si genero ese valor primitivo, si no es asi, lo guarda)
+   *                                                                                                    // Resultado de un side-effect-free (por ej: String.lenght())
+   * <p>In addition to determining active indices, this method determines if any primitive values       // Array muy largo
+   * created during execution of the sequence are new values not encountered before. Such values are    // Genera fallosdetermineActiveIndices
    * added to the component manager so they can be used during subsequent generation attempts.
    *
    * @param seq the sequence, all of whose indices are initially marked as active
@@ -415,12 +451,12 @@ public class ForwardGenerator extends AbstractGenerator {
    *   <li>it creates a duplicate sequence
    * </ul>
    *
-   * This method modifies the list of operations that represent the set of methods under tests.
-   * Specifically, if the selected operation used for creating a new and unique sequence is a
-   * parameterless operation (a static constant method or no-argument constructor) it is removed
-   * from the list of operations. Such a method will return the same thing every time it is invoked
-   * (unless it's nondeterministic, but Randoop should not be run on nondeterministic methods). Once
-   * invoked, its result is in the pool and there is no need to call the operation again and so we
+   * This method modifies the list of operations that represent the set of methods under tests.        Una operacion basicamente es cualquier linea de codigo (metodos, constructor o declaracion
+   * Specifically, if the selected operation used for creating a new and unique sequence is a           de una variable primitiva)
+   * parameterless operation (a static constant method or no-argument constructor) it is removed       En esa clase guarda una lista de todas aquellas operaciones (operations) que tiene para
+   * from the list of operations. Such a method will return the same thing every time it is invoked     usar cuando quiere generar una nueva secuencia.
+   * (unless it's nondeterministic, but Randoop should not be run on nondeterministic methods). Once   El pool del que habla lo tiene ComponentManager y alli guarda el conjunto actual de secuecias
+   * invoked, its result is in the pool and there is no need to call the operation again and so we      validas (gralComponents). Por ej: ArrayList<Integer>.
    * will remove it from the list of operations.
    *
    * @return a new sequence, or null
@@ -437,7 +473,7 @@ public class ForwardGenerator extends AbstractGenerator {
       return null;
     }
 
-    // Select the next operation to use in constructing a new sequence.
+    // Select the next operation to use in constructing a new sequence.s
     TypedOperation operation = operationSelector.selectOperation();
     Log.logPrintf("Selected operation: %s%n", operation);
 
@@ -467,7 +503,7 @@ public class ForwardGenerator extends AbstractGenerator {
     // add flags here
     InputsAndSuccessFlag inputs;
     try {
-      inputs = selectInputs(operation);
+      inputs = selectInputs(operation);           // Busca dentro de componentManager, las secuencias que puedan producir el tipo del input necesario para ejecutar la operacion operation
     } catch (Throwable e) {
       if (GenInputsAbstract.fail_on_generation_error) {
         throw new RandoopGenerationError(operation, e);

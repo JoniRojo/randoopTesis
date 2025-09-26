@@ -43,7 +43,7 @@ import randoop.util.ProgressDisplay;
  * <p>An ExecutableSequence augments a sequence with three additional pieces of data:
  *
  * <ul>
- *   <li><b>Execution results.</b> An ExecutableSequence can be executed, and the results of the
+ *   <li><b>Execution results.</b> An ExecutableSequence can be executed, and the results of the          // un step es esto
  *       execution (meaning the objects created during execution, and any exceptions thrown) are
  *       made available to clients or execution visitors to inspect.
  *   <li><b>Checks.</b> A check is an object representing an expected runtime behavior of the

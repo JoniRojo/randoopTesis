@@ -528,7 +528,7 @@ public class GenTests extends GenInputsAbstract {
             operationModel.getCoveredClassesGoal(),
             GenInputsAbstract.require_classname_in_test);
 
-    explorer.setTestPredicate(isOutputTest);
+    explorer.setTestPredicate(isOutputTest);                        // seteo el filtro
 
     /*
      * Setup visitors
@@ -1445,7 +1445,8 @@ public class GenTests extends GenInputsAbstract {
   private Path getResourceDirectoryPath(String resourceDirectory) {
     URI directoryURI;
     try {
-      directoryURI = GenTests.class.getResource(resourceDirectory).toURI();
+      //directoryURI = GenTests.class.getResource(resourceDirectory).toURI();
+      directoryURI = new URI("jar:file:/home/jona/Escritorio/Universidad/6toanio/Tesis/randoop/build/libs/randoop-all-4.3.4.jar!/specifications/jdk");
     } catch (URISyntaxException e) {
       throw new RandoopBug("Error locating directory " + resourceDirectory, e);
     }
